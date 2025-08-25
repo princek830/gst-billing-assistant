@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GST & Billing AI Assistant</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--ink:#1b2430;--brand:#0ea5e9;--brand-dark:#0369a1;--accent:#3b82f6;--border:#e5e7eb;--shadow:0 8px 24px rgba(2,6,23,.08);}
+*{box-sizing:border-box;}
+body{margin:0; display:flex; height:100vh; font-family:sans-serif; background:var(--bg);}
+#sidebar{width:360px; background:var(--brand); color:#fff; padding:16px; overflow-y:auto; flex-shrink:0;}
+.sb-title{font-weight:700; font-size:18px; margin:10px 0;}
+.input{width:100%; padding:8px 10px; margin:4px 0; border-radius:8px; border:none; outline:none;}
+.btn{padding:8px 12px; border:none; border-radius:10px; cursor:pointer; font-weight:600; margin-top:6px;}
+.btn.primary{background:var(--brand-dark); color:#fff;}
+.btn.secondary{background:rgba(255,255,255,.2); color:#fff;}
+#chatArea{flex:1; display:flex; flex-direction:column; background:var(--bg);}
+header{background:var(--accent); color:#fff; padding:12px; font-weight:700; font-size:16px;}
+#chatbox{flex:1; overflow-y:auto; padding:16px;}
+.message{padding:10px 12px; border-radius:14px; margin:8px 0; max-width:80%;}
+.user{background:#111827;color:#fff;margin-left:auto;}
+.bot{background:#fff;margin-right:auto; border:1px solid #ddd;}
+.invoice{background:#fff;border:1px solid #ccc;padding:12px;border-radius:12px; max-width:90%; font-size:14px;}
+.invoice h3{margin:0 0 6px 0; color:var(--brand);}
+.table-container{overflow-x:auto;}
+table{width:100%; border-collapse:collapse;}
+table th, table td{border:1px solid #ddd; padding:6px; text-align:left;}
+table th{background:#f3f4f6; font-weight:700;}
+#itemsTable input{width:100%; box-sizing:border-box; padding:4px; border:none; outline:none;}
+.add-row, .remove-row{cursor:pointer; color:var(--brand); font-weight:700;}
+.download-btn{margin-top:8px; background:var(--brand-dark); color:#fff; border:none; padding:6px 10px; border-radius:8px; cursor:pointer;}
+</style>
+</head>
+<body>
+
+<aside id="sidebar">
+
+<div class="sb-title">⚡ Quick GST Calculator</div>
+<input id="calcAmount" class="input" type="number" placeholder="Amount ₹">
+<input id="calcRate" class="input" type="number" placeholder="GST Rate % (default 18)">
+<button class="btn primary" onclick="quickCalc()">Calculate</button>
+<div id="calcResult" style="margin-top:6px;"></div>
+
+<div class="sb-title">🏢 Firm Details</div>
+<input id="firmName" class="input" placeholder="Firm Name">
+<input id="firmAddress" class="input" placeholder="Firm Address">
+<input id="firmGSTIN" class="input" placeholder="Firm GSTIN">
+
+<div class="sb-title">👤 Client Details</div>
+<input id="clientName" class="input" placeholder="Client Name">
+<input id="clientAddress" class="input" placeholder="Client Address">
+<input id="clientGSTIN" class="input" placeholder="Client GSTIN">
+
+<div class="sb-title">📝 Invoice Info</div>
+<input id="invoiceNo" class="input" placeholder="Invoice Number (auto if blank)">
+<input id="invoiceDate" class="input" placeholder="Date" readonly>
+
+<div class="sb-title">📦 Items</div>
+<div class="table-container">
+<table id="itemsTable">
+<thead><tr><th>Description</th><th>Qty</th><th>Rate</th><th>GST %</th><th>Action</th></tr></thead>
+<tbody id="itemsBody">
+<tr>
+<td><input type="text" value="Item 1"></td>
+<td><input type="number" value="1"></td>
+<td><input type="number" value="0"></td>
+<td><input type="number" value="18"></td>
+<td><span class="remove-row" onclick="removeRow(this)">❌</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+<button class="btn secondary" onclick="addRow()">➕ Add Item</button>
+<button class="btn primary" onclick="generateInvoice()">Generate Invoice</button>
+
+</aside>
+
+<section id="chatArea">
+<header>🇮🇳 GST & Billing AI Assistant</header>
+<main id="chatbox"></main>
+<footer style="display:flex; gap:8px; padding:8px; background:#fff;">
+<input id="userInput" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:8px;" placeholder="Try: /gst 1250 18 or /invoice 5000">
+<button class="btn primary" onclick="sendMessage()">Send</button>
+</footer>
+</section>
+
+<script>
+const chatbox=document.getElementById('chatbox');
+const invoiceDate=document.getElementById('invoiceDate');
+invoiceDate.value=new Date().toISOString().slice(0,10);
+
+function appendMessage(sender,html){const div=document.createElement('div');div.className='message '+sender;div.innerHTML=html;chatbox.appendChild(div);chatbox.scrollTop=chatbox.scrollHeight;}
+
+function addRow(){
+  const tbody=document.getElementById('itemsBody');
+  const tr=document.createElement('tr');
+  tr.innerHTML='<td><input type="text" value="Item"></td><td><input type="number" value="1"></td><td><input type="number" value="0"></td><td><input type="number" value="18"></td><td><span class="remove-row" onclick="removeRow(this)">❌</span></td>';
+  tbody.appendChild(tr);
+}
+
+function removeRow(span){span.closest('tr').remove();}
+
+// Quick GST Calculator
+function quickCalc(){
+  const amt=parseFloat(document.getElementById('calcAmount').value);
+  const rate=parseFloat(document.getElementById('calcRate').value)||18;
+  if(!amt){document.getElementById('calcResult').innerText='Enter amount'; return;}
+  const gst=(amt*rate)/100, cgst=gst/2, sgst=gst/2, total=amt+gst;
+  document.getElementById('calcResult').innerText=`GST ₹${gst.toFixed(2)} (CGST ₹${cgst.toFixed(2)}, SGST ₹${sgst.toFixed(2)}), Total ₹${total.toFixed(2)}`;
+}
+
+// AI chat commands
+function sendMessage(){
+  const input=document.getElementById('userInput'); const text=input.value.trim();
+  if(!text) return; appendMessage('user',text); input.value=''; processBot(text);
+}
+
+function processBot(msg){
+  let reply='⚡ Commands: /gst amount rate, /invoice amount, /turnover amount';
+  if(msg.startsWith('/gst')){
+    const parts=msg.split(' '); if(parts.length>=2){
+      const amount=parseFloat(parts[1]); const rate=parseFloat(parts[2]||18);
+      const gst=(amount*rate)/100, cgst=gst/2, sgst=gst/2, total=amount+gst;
+      reply=`Base ₹${amount}, GST @${rate}% ₹${gst.toFixed(2)} (CGST ₹${cgst.toFixed(2)}, SGST ₹${sgst.toFixed(2)}), Total ₹${total.toFixed(2)}`;
+    }
+  } else if(msg.startsWith('/invoice')){
+    const parts=msg.split(' '); if(parts.length>=2){
+      const amount=parseFloat(parts[1]); const rate=parseFloat(parts[2]||18);
+      const gst=(amount*rate)/100, cgst=gst/2, sgst=gst/2, total=amount+gst;
+      reply=`Invoice ₹${amount} + GST @${rate}% = ₹${total.toFixed(2)}`;
+    }
+  } else if(msg.startsWith('/turnover')){
+    const parts=msg.split(' '); const amt=parseFloat(parts[1]||0);
+    reply=amt>0?`Turnover: ₹${amt}, Tax Income (18%): ₹${(amt*0.18).toFixed(2)}`:'Enter amount';
+  }
+  appendMessage('bot',reply);
+}
+
+// Generate multi-item invoice
+function generateInvoice(){
+  const firmName=document.getElementById('firmName').value||'My Firm';
+  const firmAddress=document.getElementById('firmAddress').value||'-';
+  const firmGSTIN=document.getElementById('firmGSTIN').value||'-';
+  const clientName=document.getElementById('clientName').value||'Client';
+  const clientAddress=document.getElementById('clientAddress').value||'-';
+  const clientGSTIN=document.getElementById('clientGSTIN').value||'-';
+  const invoiceNo=document.getElementById('invoiceNo').value||`INV${Date.now()}`;
+  const invoiceDt=document.getElementById('invoiceDate').value||new Date().toISOString().slice(0,10);
+
+  const tbody=document.getElementById('itemsBody');
+  const items=[]; let subtotal=0, totalGST=0;
+  Array.from(tbody.rows).forEach(r=>{
+    const desc=r.cells[0].querySelector('input').value;
+    const qty=parseFloat(r.cells[1].querySelector('input').value)||0;
+    const rate=parseFloat(r.cells[2].querySelector('input').value)||0;
+    const gstRate=parseFloat(r.cells[3].querySelector('input').value)||18;
+    const amt=qty*rate; const gst=(amt*gstRate)/100;
+    subtotal+=amt; totalGST+=gst;
+    items.push({desc,qty,rate,gstRate,amt,gst});
+  });
+  const cgst=totalGST/2, sgst=totalGST/2, total=subtotal+totalGST;
+
+  let html=`<div class="invoice"><h3>🧾 Invoice - ${invoiceNo}</h3>
+<div><b>Firm:</b> ${firmName}<br><b>Address:</b> ${firmAddress}<br><b>GSTIN:</b> ${firmGSTIN}</div>
+<div style="margin-top:6px;"><b>Client:</b> ${clientName}<br><b>Address:</b> ${clientAddress}<br><b>GSTIN:</b> ${clientGSTIN}</div>
+<div style="margin-top:6px;"><b>Date:</b> ${invoiceDt}</div>
+<div class="table-container"><table><thead><tr><th>Description</th><th>Qty</th><th>Rate</th><th>GST %</th><th>Amount</th></tr></thead><tbody>`;
+  items.forEach(i=>{html+=`<tr><td>${i.desc}</td><td>${i.qty}</td><td>₹${i.rate}</td><td>${i.gstRate}%</td><td>₹${(i.amt+i.gst).toFixed(2)}</td></tr>`;});
+  html+=`</tbody></table></div>
+<div style="margin-top:6px;"><b>Subtotal:</b> ₹${subtotal.toFixed(2)}<br><b>Total GST:</b> ₹${totalGST.toFixed(2)} (CGST ₹${cgst.toFixed(2)}, SGST ₹${sgst.toFixed(2)})<br><b>Total:</b> ₹${total.toFixed(2)}</div>
+<button class="download-btn" onclick='downloadPDF()'>📥 Download PDF</button>
+</div>`;
+  appendMessage('bot',html);
+
+  window.invoiceData={firmName,firmAddress,firmGSTIN,clientName,clientAddress,clientGSTIN,invoiceNo,invoiceDt,items};
+}
+
+// PDF Generation
+function downloadPDF(){
+  const inv=window.invoiceData;
+  const { jsPDF }=window.jspdf; const doc=new jsPDF({unit:'mm',format:'a4'});
+  doc.setFontSize(16); doc.setTextColor(59,130,246); doc.text("GST Invoice",105,15,{align:'center'});
+  doc.setFontSize(11); doc.setTextColor(0,0,0);
+  let y=25;
+  doc.text(`Invoice No: ${inv.invoiceNo}`,14,y); doc.text(`Date: ${inv.invoiceDt}`,150,y); y+=6;
+  doc.text(`Firm: ${inv.firmName}`,14,y); y+=5; doc.text(`Address: ${inv.firmAddress}`,14,y); y+=5; doc.text(`GSTIN: ${inv.firmGSTIN}`,14,y); y+=8;
+  doc.text(`Client: ${inv.clientName}`,14,y); y+=5; doc.text(`Address: ${inv.clientAddress}`,14,y); y+=5; doc.text(`GSTIN: ${inv.clientGSTIN}`,14,y); y+=8;
+
+  doc.autoTable({
+    startY:y,
+    head:[['Description','Qty','Rate','GST %','Amount']],
+    body: inv.items.map(i=>[i.desc,i.qty,i.rate,i.gstRate, (i.amt+i.gst).toFixed(2)]),
+    theme:'grid',
+    headStyles:{fillColor:[59,130,246],textColor:255},
+    styles:{cellPadding:2,fontSize:10}
+  });
+
+  let subtotal=inv.items.reduce((s,i)=>s+i.amt,0);
+  let totalGST=inv.items.reduce((s,i)=>s+i.gst,0);
+  const cgst=totalGST/2, sgst=totalGST/2, total=subtotal+totalGST;
+  y=doc.lastAutoTable.finalY+4;
+  doc.text(`Subtotal: ₹${subtotal.toFixed(2)}`,14,y); y+=6;
+  doc.text(`Total GST: ₹${totalGST.toFixed(2)} (CGST ₹${cgst.toFixed(2)}, SGST ₹${sgst.toFixed(2)})`,14,y); y+=6;
+  doc.text(`Total: ₹${total.toFixed(2)}`,14,y); y+=6;
+  doc.save(`invoice_${inv.invoiceNo}.pdf`);
+}
+
+// Initial greeting
+appendMessage('bot','👋 Namaste! Use quick calculator or chat commands (/gst, /invoice, /turnover) or generate multi-item invoices.');
+</script>
+
+</body>
+</html>
